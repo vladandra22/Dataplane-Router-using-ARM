@@ -1,0 +1,52 @@
+1. Introducere
+
+Tema consta in procesul de trimitere a pachetelor intr-un router, primind ca input un buffer si o interfata pe care trebuie sa forwardam. 
+A fost necesara implementarea a 3 protocoale: IP, ARP si ICMP. 
+
+2. Protocol IP si Implementare LPM folosind Trie
+
+Daca primim un pachet de tip IP: 
+	- Verificam daca el este destinatia. Daca da, trimitem pe interfata un mesaj ICMP cu type = 0, code = 0 (ECHO REPLY).
+	- Verificam checksum-ul. Avem grija sa il convertim pe cel initial in Host Order inainte sa verificam.
+	- Verificare si actualizare TTL. Daca ttl <= 1, trimitem pe interfata un mesaj ICMP cu type = 11, code = 0 („Time exceeded”).
+	- Cautam in tabela de rutare cea mai buna ruta pentru adresa destinatie din IP header. 
+    Voi intra in detaliu despre aceasta implementare mai jos. 
+    De asemenea, daca aceasta ruta nu exista, trimitem pe interfata un mesaj ICMP cu type = 3, code = 0 („Destination unreachable”).
+	- Actualizam checksum-ul.
+	- Cautam adresa fizica (MAC) a urmatorului hop. 
+    Daca aceasta exista (avem un ARP entry), vom rescrie adresele L2 si vom trimite pachetul pe interfata celei mai bune rute gasite. 
+
+In implementarea trie-ului, am folosit ca si campuri cei doi copii (biti de 0 si 1) si 
+entry-ul specific IP-ului pe care il inseram (entry->prefix). 
+Trebuie sa parcurgem arborele incepand de la radacina si sa gasim cel mai specific prefix care sa contina adresa respectiva. 
+O sa aleg ca exemplu o adresa pentru a explica algoritmul. 
+Pentru 192.1.6.15/24, o sa convertesc adresa in Host Order si va fi 3229617175. 
+In get_best_route_trie, incepem parcurgerea de la bitul cel mai semnificativ, 31, si ne deplasam in jos in functie de valoarea fiecarui bit. 
+Daca nodul curent are copilul corespunzator bitul curent, ne deplasam in acel copil si salvam entry-ul asociat. 
+In accest caz, vom parcurge astfel:
+	- bit 31 = 1 -> ne deplasam in copilul 1
+	- bit 30 = 0 -> ne deplasam in copilul 0
+	- bit 29 = 0 -> ne deplasam in copilul 0
+	- bit 28 = 0 -> ne deplasam in copilul 0
+	- bit 27 = 0 -> ne deplasam in copiliul 0
+	- bit 26 = 0 -> ne deplasam in copilul 0
+	- bit 25 = 1 -> ne deplasam in copilul 1.
+In acest punct, ajungem la un nod fara copii, deci nu mai parcurgem. Salvam deci ultimul entry si la acest nod, daca parcurgem, vom gasi LPM. 
+Trebuie sa avem grija, insa, la inceput, sa convertim mastile si IP-urile in Host Order. Algoritmul are complexitatea O(log rtable_len).
+
+3. Protocol ARP.
+In aceasta parte, m-am ocupat de dirijarea pachetelor. Daca la pasul 1 nu am gasit un ARP Entry, introducem pachetul intr-o coada 
+si trimitem ARP request catre broadcast. Nu putem completa campul arp_tha, deoarece nu stim inca adresa MAC cautata. 
+Daca primim ARP request, raspundem cu un ARP reply cu adresa MAC a interfetei sursa. 
+Daca primim un ARP reply, actualizam in tabela ARP cu ceea ce am primit si extragem pachete din coada pana cand intanlim pachetul necesar 
+forwardarii pe best_route->next_hop. Astfel, router-ul poate functiona fara a primi din start un raspuns si poate dirija alte pachete intre timp.
+
+4. Protocol ICMP.
+Cazurile mentionate la pasul 1 au fost tratate in functia icmp_message, unde creez pachetul ICMP, cu ajutorul detaliilor oferite in 
+protocols.h si primesc ca argument type-ul necesar pachetului.
+
+5. Resurse:
+https://www.lewuathe.com/longest-prefix-match-with-trie-tree.html
+https://linux.die.net/man/3/inet_aton
+https://www.oreilly.com/library/view/packet-guide-to/9781449308094/ch04.html
+
